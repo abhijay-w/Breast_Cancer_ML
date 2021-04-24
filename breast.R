@@ -1,0 +1,185 @@
+setwd("C:/Users/Abhijay/Desktop/Cancer")
+getwd()
+
+#Loading Packages
+library(caret)
+library(ggfortify)
+library(dplyr)
+library(tidyverse)
+library(magrittr)
+
+#Loading dataset
+df <- read.csv("data.csv")
+
+# the 33 column is not right
+df[,33] <- NULL
+
+# This is defintely an most important step:  
+# Check for appropriate class on each of the variable.  
+glimpse(df)
+
+df$diagnosis <- as.factor(df$diagnosis)
+
+#Missing values
+map_int(df, function(.x) sum(is.na(.x)))
+
+round(prop.table(table(df$diagnosis)), 2)
+
+#Checking correlations
+df_corr <- cor(df %>% select(-id, -diagnosis))
+corrplot::corrplot(df_corr, order = "hclust", tl.cex = 1, addrect = 8)
+
+# The findcorrelation() function from caret package remove highly correlated predictors
+# based on whose correlation is above 0.9. This function uses a heuristic algorithm 
+# to determine which variable should be removed instead of selecting blindly
+df2 <- df %>% select(-findCorrelation(df_corr, cutoff = 0.9))
+
+ncol(df2)
+df$diagnosis <- as.factor(df$diagnosis)
+
+
+round(prop.table(table(df$diagnosis)), 2)
+
+#PCA analysis
+preproc_pca_df <- prcomp(df %>% select(-id, -diagnosis), scale = TRUE, center = TRUE)
+summary(preproc_pca_df)
+
+# Calculate the proportion of variance explained
+pca_df_var <- preproc_pca_df$sdev^2
+pve_df <- pca_df_var / sum(pca_df_var)
+cum_pve <- cumsum(pve_df)
+pve_table <- tibble(comp = seq(1:ncol(df %>% select(-id, -diagnosis))), pve_df, cum_pve)
+
+#Ploting
+ggplot(pve_table, aes(x = comp, y = cum_pve)) + 
+  geom_point() + 
+  geom_abline(intercept = 0.95, color = "red", slope = 0) + 
+  labs(x = "Number of components", y = "Cumulative Variance")
+
+#Most influential variables for the first 2 components
+pca_df <- as_tibble(preproc_pca_df$x)
+ggplot(pca_df, aes(x = PC1, y = PC2, col = df$diagnosis)) + geom_point()
+
+autoplot(preproc_pca_df, data = df,  colour = 'diagnosis',
+         loadings = FALSE, loadings.label = TRUE, loadings.colour = "blue")
+
+#For df2
+preproc_pca_df2 <- prcomp(df2, scale = TRUE, center = TRUE)
+summary(preproc_pca_df2)
+
+pca_df2_var <- preproc_pca_df2$sdev^2
+
+# proportion of variance explained
+pve_df2 <- pca_df2_var / sum(pca_df2_var)
+cum_pve_df2 <- cumsum(pve_df2)
+pve_table_df2 <- tibble(comp = seq(1:ncol(df2)), pve_df2, cum_pve_df2)
+
+ggplot(pve_table_df2, aes(x = comp, y = cum_pve_df2)) + 
+  geom_point() + 
+  geom_abline(intercept = 0.95, color = "red", slope = 0) + 
+  labs(x = "Number of components", y = "Cumulative Variance")
+
+#LDA
+preproc_lda_df <- MASS::lda(diagnosis ~., data = df, center = TRUE, scale = TRUE)
+preproc_lda_df
+
+# Making a df out of the LDA for visualization purpose.
+predict_lda_df <- predict(preproc_lda_df, df)$x %>% 
+  as_tibble() %>% 
+  cbind(diagnosis = df$diagnosis)
+
+glimpse(predict_lda_df)
+
+#Model the data
+set.seed(1815)
+df3 <- cbind(diagnosis = df$diagnosis, df2)
+df_sampling_index <- createDataPartition(df3$diagnosis, times = 1, p = 0.8, list = FALSE)
+df_training <- df3[df_sampling_index, ]
+df_testing <-  df3[-df_sampling_index, ]
+df_control <- trainControl(method="cv",
+                           number = 15,
+                           classProbs = TRUE,
+                           summaryFunction = twoClassSummary)
+
+#Logistic Regression
+model_logreg_df <- train(diagnosis ~., data = df_training, method = "glm", 
+                         metric = "ROC", preProcess = c("scale", "center"), 
+                         trControl = df_control)
+
+prediction_logreg_df <- predict(model_logreg_df, df_testing)
+cm_logreg_df <- confusionMatrix(prediction_logreg_df, df_testing$diagnosis, positive = "M")
+cm_logreg_df
+
+#Random Forest
+model_rf_df <- train(diagnosis ~., data = df_training,
+                     method = "rf", 
+                     metric = 'ROC', 
+                     trControl = df_control)
+
+prediction_rf_df <- predict(model_rf_df, df_testing)
+cm_rf_df <- confusionMatrix(prediction_rf_df, df_testing$diagnosis, positive = "M")
+cm_rf_df
+
+plot(model_rf_df)
+
+plot(model_rf_df$finalModel)
+
+randomForest::varImpPlot(model_rf_df$finalModel, sort = TRUE, 
+                         n.var = 10, main = "The 10 variables with the most predictive power")
+
+#KNN
+model_knn_df <- train(diagnosis ~., data = df_training, 
+                      method = "knn", 
+                      metric = "ROC", 
+                      preProcess = c("scale", "center"), 
+                      trControl = df_control, 
+                      tuneLength =31)
+
+plot(model_knn_df)
+
+prediction_knn_df <- predict(model_knn_df, df_testing)
+cm_knn_df <- confusionMatrix(prediction_knn_df, df_testing$diagnosis, positive = "M")
+cm_knn_df
+
+#SVM with PCA 
+set.seed(1815)
+df_control_pca <- trainControl(method="cv",
+                               number = 15,
+                               preProcOptions = list(thresh = 0.9), # threshold for pca preprocess
+                               classProbs = TRUE,
+                               summaryFunction = twoClassSummary)
+
+model_svm_pca_df <- train(diagnosis~.,
+                          df_training, method = "svmLinear", metric = "ROC", 
+                          preProcess = c('center', 'scale', "pca"), 
+                          trControl = df_control_pca)
+
+prediction_svm_pca_df <- predict(model_svm_pca_df, df_testing)
+cm_svm_pca_df <- confusionMatrix(prediction_svm_pca_df, df_testing$diagnosis, positive = "M")
+cm_svm_pca_df
+
+#Neural Network
+lda_training <- predict_lda_df[df_sampling_index, ]
+lda_testing <- predict_lda_df[-df_sampling_index, ]
+model_nnetlda_df <- train(diagnosis ~., lda_training, 
+                          method = "nnet", 
+                          metric = "ROC", 
+                          preProcess = c("center", "scale"), 
+                          tuneLength = 10, 
+                          trace = FALSE, 
+                          trControl = df_control)
+
+prediction_nnetlda_df <- predict(model_nnetlda_df, lda_testing)
+cm_nnetlda_df <- confusionMatrix(prediction_nnetlda_df, lda_testing$diagnosis, positive = "M")
+cm_nnetlda_df
+
+#Model Evaluation
+model_list <- list(logisic = model_logreg_df, rf = model_rf_df, knn=model_knn_df,
+                   SVM_with_PCA = model_svm_pca_df,Neural_with_LDA = model_nnetlda_df)
+results <- resamples(model_list)
+
+summary(results)
+
+bwplot(results, metric = "ROC")
+
+#End
