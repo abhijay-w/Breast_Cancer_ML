@@ -1,4 +1,4 @@
-# Breast_Cancer_ML
+# Breast Cancer Prediction and Analysis in R
 Breast cancer is one of the most severe cancers. It has taken hundreds of thousands of lives every year. Early prediction of breast cancer plays an important role in successful treatment and saving the lives of thousands of patients every year. However, the conventional approaches are limited in providing such capability. 
 
 The recent breakthrough of data analytics and data mining techniques have opened a new door for healthcare diagnostic and prediction. Machine learning methods for diagnosis can significantly increase processing speed and on a big scale can make the diagnosis significantly cheaper.
